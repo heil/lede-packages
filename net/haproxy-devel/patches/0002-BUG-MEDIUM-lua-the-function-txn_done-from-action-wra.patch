@@ -1,0 +1,73 @@
+From 82a84af5b4d5d17bf73a1873a7c4bf6eb77a6d31 Mon Sep 17 00:00:00 2001
+From: Thierry FOURNIER <thierry.fournier@ozon.io>
+Date: Thu, 14 Jul 2016 11:45:33 +0200
+Subject: [PATCH 2/2] BUG/MEDIUM: lua: the function txn_done() from action
+ wrapper can crash
+
+If an action wrapper stops the processing of the transaction
+with a txn_done() function, the return code of the action is
+"continue". So the continue can implies the processing of other
+like adding headers. However, the HTTP content is flushed and
+a segfault occurs.
+
+This patchs add a flag indicating that the Lua code want to
+stop the processing, ths flags is forwarded to the haproxy core,
+and other actions are ignored.
+
+Must be backported in 1.6
+
+(cherry picked from commit 9bd52d478b2561666633f21086b60a1b488a25b7)
+---
+ include/types/hlua.h | 1 +
+ src/hlua.c           | 5 +++++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/include/types/hlua.h b/include/types/hlua.h
+index b87745e..882b5f4 100644
+--- a/include/types/hlua.h
++++ b/include/types/hlua.h
+@@ -28,6 +28,7 @@ struct stream;
+ #define HLUA_WAKEREQWR 0x00000008
+ #define HLUA_EXIT      0x00000010
+ #define HLUA_MUST_GC   0x00000020
++#define HLUA_STOP      0x00000040
+ 
+ #define HLUA_F_AS_STRING    0x01
+ #define HLUA_F_MAY_USE_HTTP 0x02
+diff --git a/src/hlua.c b/src/hlua.c
+index 7cc4afc..342e158 100644
+--- a/src/hlua.c
++++ b/src/hlua.c
+@@ -4819,10 +4819,12 @@ __LJMP static int hlua_txn_set_mark(lua_State *L)
+ __LJMP static int hlua_txn_done(lua_State *L)
+ {
+ 	struct hlua_txn *htxn;
++	struct hlua *hlua;
+ 	struct channel *ic, *oc;
+ 
+ 	MAY_LJMP(check_args(L, 1, "close"));
+ 	htxn = MAY_LJMP(hlua_checktxn(L, 1));
++	hlua = hlua_gethlua(L);
+ 
+ 	/* If the flags NOTERM is set, we cannot terminate the http
+ 	 * session, so we just end the execution of the current
+@@ -4866,6 +4868,7 @@ __LJMP static int hlua_txn_done(lua_State *L)
+ 
+ 	ic->analysers = 0;
+ 
++	hlua->flags |= HLUA_STOP;
+ 	WILL_LJMP(hlua_done(L));
+ 	return 0;
+ }
+@@ -5549,6 +5552,8 @@ static enum act_return hlua_action(struct act_rule *rule, struct proxy *px,
+ 	case HLUA_E_OK:
+ 		if (!hlua_check_proto(s, dir))
+ 			return ACT_RET_ERR;
++		if (s->hlua.flags & HLUA_STOP)
++			return ACT_RET_STOP;
+ 		return ACT_RET_CONT;
+ 
+ 	/* yield. */
+-- 
+2.7.3
+
