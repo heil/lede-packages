@@ -31,6 +31,7 @@ define Package/varnish-devel
   TITLE:=VARNISH CACHE 4.1.x make Websites fly
   URL:=http://www.varnish-cache.org/
   DEPENDS:=+libpcre +libltdl +libncurses +logrotate +librt +bash +zlib  +libelf +libreadline +libncursesw
+  USERID:=varnish=199:varnish=199
 endef
 
 define Package/varnish-devel/description
@@ -53,6 +54,7 @@ CONFIGURE_VARS += \
 
 define Build/Configure
         (cd $(PKG_BUILD_DIR); rm -f config.cache; \
+		VCC_CC="x86_64-openwrt-linux-gnu-gcc -std=gnu99 -O2 -march=x86-64 -pipe -fomit-frame-pointer -fno-caller-saves  -fhonour-copts -Wno-error=unused-but-set-variable -Wno-error=unused-result -Wformat -Werror=format-security -D_FORTIFY_SOURCE=1 -Wl,-z,now -Wl,-z,relro -Wall -Werror -Wno-error=unused-result -pthread -fpic -shared -Wl,-x -o %o %s" \
                 $(TARGET_CONFIGURE_OPTS) \
                 CFLAGS="$(TARGET_CFLAGS)" \
                 CPPFLAGS="$(TARGET_CPPFLAGS)" \
@@ -70,7 +72,7 @@ endef
 
 define Build/Compile
 
-	$(MAKE) -C $(PKG_BUILD_DIR) \
+	$(MAKE) -j4 -C $(PKG_BUILD_DIR) \
 		CC="$(TARGET_CC)" \
 		CFLAGS="$(TARGET_CFLAGS) -std=gnu99" \
 		LD="$(TARGET_CC)" \
@@ -98,6 +100,8 @@ endef
 define Package/varnish-devel/install
 	$(INSTALL_DIR) $(1)/etc/varnish
 	$(INSTALL_CONF) $(PKG_INSTALL_DIR)/etc/builtin.vcl $(1)/etc/varnish
+	$(INSTALL_CONF) ./files/config.vcl $(1)/etc/varnish
+	chmod 0754 $(1)/etc/varnish/config.vcl
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/varnish.init $(1)/etc/init.d/varnish
 	chmod 0750 $(1)/etc/init.d/varnish

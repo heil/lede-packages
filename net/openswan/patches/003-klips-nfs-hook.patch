@@ -1,0 +1,68 @@
+Index: openswan-2.6.49/linux/include/openswan/ipsec_param2.h
+===================================================================
+--- openswan-2.6.49.orig/linux/include/openswan/ipsec_param2.h
++++ openswan-2.6.49/linux/include/openswan/ipsec_param2.h
+@@ -24,8 +24,12 @@
+ #endif
+ 
+ #if defined(IP_SELECT_IDENT_NEW)
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0))
+ #define KLIPS_IP_SELECT_IDENT(iph, skb) __ip_select_ident(iph, 1)
+ #else
++#define KLIPS_IP_SELECT_IDENT(iph, skb) __ip_select_ident(dev_net(skb->dev), iph, 1)
++#endif
++#else
+ #define KLIPS_IP_SELECT_IDENT(iph, skb) __ip_select_ident(iph, skb_dst(skb), 0)
+ #endif
+ 
+Index: openswan-2.6.49/linux/net/ipsec/ipsec_xmit.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/ipsec_xmit.c
++++ openswan-2.6.49/linux/net/ipsec/ipsec_xmit.c
+@@ -2364,7 +2364,11 @@ ipsec_xmit_cleanup(struct ipsec_xmit_sta
+ 	}
+ }
+ 
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0))
+ static inline int ipsec_xmit_send2(struct sk_buff *skb)
++#else
++static inline int ipsec_xmit_send2(struct sock *sk, struct sk_buff *skb)
++#endif
+ {
+ #ifdef NETDEV_25	/* 2.6 kernels */
+ 	return dst_output(skb);
+@@ -2382,7 +2386,11 @@ static inline int ipsec_xmit_send2_mast(
+ 		skb->nfmark = 0;
+ #endif
+ #endif
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0))
+ 	return ipsec_xmit_send2(skb);
++#else
++	return ipsec_xmit_send2(skb->sk, skb);
++#endif
+ 
+ }
+ 
+Index: openswan-2.6.49/linux/net/ipsec/pfkey_v2.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/pfkey_v2.c
++++ openswan-2.6.49/linux/net/ipsec/pfkey_v2.c
+@@ -1078,11 +1078,18 @@ pfkey_sendmsg(struct socket *sock, struc
+ 
+ DEBUG_NO_STATIC int
+ #ifdef NET_26
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
++pfkey_recvmsg(struct socket *sock,
++	      struct msghdr *msg,
++	      size_t size,
++	      int flags)
++#else
+ pfkey_recvmsg(struct kiocb *kiocb
+ 	      , struct socket *sock
+ 	      , struct msghdr *msg
+ 	      , size_t size
+ 	      , int flags)
++#endif
+ #else
+ pfkey_recvmsg(struct socket *sock
+ 	      , struct msghdr *msg

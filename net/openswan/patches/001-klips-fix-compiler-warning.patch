@@ -1,0 +1,13 @@
+Index: openswan-2.6.49/linux/net/ipsec/ipsec_alg.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/ipsec_alg.c
++++ openswan-2.6.49/linux/net/ipsec/ipsec_alg.c
+@@ -798,7 +798,7 @@ out:
+  * 	used at module load type for testing algo implementation
+  */
+ static int ipsec_alg_test_auth(int auth_alg, int test) {
+-	int ret;
++	int ret = 0;
+ 	caddr_t buf = NULL;
+ 	int blocksize, keysize, key_a_size;
+ 	struct ipsec_alg_auth *ixt_a;

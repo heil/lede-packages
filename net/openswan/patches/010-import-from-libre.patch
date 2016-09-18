@@ -1,0 +1,244 @@
+Index: openswan-2.6.49/linux/net/ipsec/ipsec_mast.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/ipsec_mast.c
++++ openswan-2.6.49/linux/net/ipsec/ipsec_mast.c
+@@ -107,10 +107,16 @@ ipsec_mast_close(struct net_device *dev)
+ 
+ static inline int ipsec_mast_xmit2(struct sk_buff *skb)
+ {
+-#ifdef NETDEV_25	/* 2.6 kernels */
+-	return dst_output(skb);
++#ifdef NET_26   /* 2.6 kernels */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
++        return dst_output(dev_net(skb->dev), skb->sk, skb);
+ #else
+-	return ip_send(skb);
++        return dst_output(skb);
++#endif
++
++#else
++        return ip_send(skb);
++
+ #endif
+ }
+ 
+Index: openswan-2.6.49/linux/net/ipsec/ipsec_tunnel.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/ipsec_tunnel.c
++++ openswan-2.6.49/linux/net/ipsec/ipsec_tunnel.c
+@@ -145,9 +145,15 @@ static inline int ipsec_tunnel_xmit2(str
+ {
+ 
+ #ifdef NETDEV_25	/* 2.6 kernels */
+-	return dst_output(skb);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
++        return dst_output(dev_net(skb->dev), skb->sk, skb);
+ #else
+-	return ip_send(skb);
++        return dst_output(skb);
++#endif
++ 
++#else
++        return ip_send(skb);
++ 
+ #endif
+ }
+ 
+Index: openswan-2.6.49/linux/net/ipsec/ipsec_xmit.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/ipsec_xmit.c
++++ openswan-2.6.49/linux/net/ipsec/ipsec_xmit.c
+@@ -2364,16 +2364,24 @@ ipsec_xmit_cleanup(struct ipsec_xmit_sta
+ 	}
+ }
+ 
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0))
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)
+ static inline int ipsec_xmit_send2(struct sk_buff *skb)
+-#else
++#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0)
+ static inline int ipsec_xmit_send2(struct sock *sk, struct sk_buff *skb)
++#else
++static inline int ipsec_xmit_send2(struct net *net, struct sock *sk, struct sk_buff *skb)
+ #endif
+ {
+-#ifdef NETDEV_25	/* 2.6 kernels */
+-	return dst_output(skb);
++#ifdef NET_26   /* 2.6 kernels */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
++        return dst_output(dev_net(skb->dev), sk, skb);
+ #else
+-	return ip_send(skb);
++        return dst_output(skb);
++#endif
++
++#else
++        return ip_send(skb);
++
+ #endif
+ }
+ 
+@@ -2386,10 +2394,12 @@ static inline int ipsec_xmit_send2_mast(
+ 		skb->nfmark = 0;
+ #endif
+ #endif
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0))
+-	return ipsec_xmit_send2(skb);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)
++        return ipsec_xmit_send2(skb);
++#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0)
++        return ipsec_xmit_send2(skb->sk, skb);
+ #else
+-	return ipsec_xmit_send2(skb->sk, skb);
++        return ipsec_xmit_send2(dev_net(skb->dev), skb->sk, skb);
+ #endif
+ 
+ }
+@@ -2643,11 +2653,25 @@ ipsec_xmit_send(struct ipsec_xmit_state
+ 			err = ipsec_xmit_send2_mast(ixs->skb);
+ 
+ 		else if (ip_hdr(ixs->skb)->version == 6)
+-			err = NF_HOOK(PF_INET6, OSW_NF_INET_LOCAL_OUT, ixs->skb, NULL,
++			err = NF_HOOK(PF_INET6, OSW_NF_INET_LOCAL_OUT, 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
++                                      dev_net(ixs->skb->dev),
++#endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
++                                      ixs->skb->sk,
++#endif
++					ixs->skb, NULL,
+ 					ixs->route ? ipsec_route_dst(ixs->route).dev : skb_dst(ixs->skb)->dev,
+ 					ipsec_xmit_send2);
+ 		else
+-			err = NF_HOOK(PF_INET, OSW_NF_INET_LOCAL_OUT, ixs->skb, NULL,
++			err = NF_HOOK(PF_INET, OSW_NF_INET_LOCAL_OUT,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0)
++                                      dev_net(ixs->skb->dev),
++#endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
++                                      ixs->skb->sk,
++#endif
++                                      ixs->skb, NULL,
+ 					ixs->route ? ipsec_route_dst(ixs->route).dev : skb_dst(ixs->skb)->dev,
+ 					ipsec_xmit_send2);
+ 
+Index: openswan-2.6.49/linux/net/ipsec/pfkey_v2.c
+===================================================================
+--- openswan-2.6.49.orig/linux/net/ipsec/pfkey_v2.c
++++ openswan-2.6.49/linux/net/ipsec/pfkey_v2.c
+@@ -119,12 +119,24 @@ DEBUG_NO_STATIC int pfkey_shutdown(struc
+ DEBUG_NO_STATIC int pfkey_release(struct socket *sock);
+ 
+ #ifdef NET_26
+-DEBUG_NO_STATIC int pfkey_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg, size_t len);
+-DEBUG_NO_STATIC int pfkey_recvmsg(struct kiocb *kiocb, struct socket *sock, struct msghdr *msg
+-				  , size_t size, int flags);
++# if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
++DEBUG_NO_STATIC int pfkey_sendmsg(struct socket *sock,
++                                  struct msghdr *msg, size_t len);
++DEBUG_NO_STATIC int pfkey_recvmsg(struct socket *sock,
++                                  struct msghdr *msg,
++                                  size_t size, int flags);
++# else
++DEBUG_NO_STATIC int pfkey_sendmsg(struct kiocb *iocb, struct socket *sock,
++                                  struct msghdr *msg, size_t len);
++DEBUG_NO_STATIC int pfkey_recvmsg(struct kiocb *kiocb, struct socket *sock,
++                                  struct msghdr *msg,
++                                  size_t size, int flags);
++# endif
+ #else
+-DEBUG_NO_STATIC int pfkey_sendmsg(struct socket *sock, struct msghdr *msg, int len, struct scm_cookie *scm);
+-DEBUG_NO_STATIC int pfkey_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags, struct scm_cookie *scm);
++DEBUG_NO_STATIC int pfkey_sendmsg(struct socket *sock, struct msghdr *msg,
++                                  int len, struct scm_cookie *scm);
++DEBUG_NO_STATIC int pfkey_recvmsg(struct socket *sock, struct msghdr *msg,
++                                  int size, int flags, struct scm_cookie *scm);
+ #endif
+ 
+ struct net_proto_family pfkey_family_ops = {
+@@ -744,7 +756,8 @@ pfkey_create(struct socket *sock, int pr
+ 
+ #ifdef NET_26
+ #ifdef NET_26_24_SKALLOC
+-       sk=(struct sock *)sk_alloc(net, PF_KEY, GFP_KERNEL, &key_proto);
++       sk=(struct sock *)sk_alloc(net, PF_KEY, GFP_KERNEL, &key_proto, 1);
++
+ #else
+ #ifdef NET_26_12_SKALLOC
+ 	sk=(struct sock *)sk_alloc(PF_KEY, GFP_KERNEL, &key_proto, 1);
+@@ -892,9 +905,16 @@ pfkey_shutdown(struct socket *sock, int
+ 
+ DEBUG_NO_STATIC int
+ #ifdef NET_26
+-pfkey_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg, size_t len)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
++pfkey_sendmsg(struct socket *sock, struct msghdr *msg,
++              size_t len)
++#else
++pfkey_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
++              size_t len)
++#endif
+ #else
+-pfkey_sendmsg(struct socket *sock, struct msghdr *msg, int len, struct scm_cookie *scm)
++pfkey_sendmsg(struct socket *sock, struct msghdr *msg, int len,
++      
+ #endif
+ {
+ 	struct sock *sk;
+@@ -976,7 +996,7 @@ pfkey_sendmsg(struct socket *sock, struc
+ 		SENDERR(ENOBUFS);
+ 	}
+ 
+-	memcpy_fromiovec((void *)pfkey_msg, msg->msg_iov, len);
++        memcpy_from_msg((void *)pfkey_msg, msg, len);
+ 
+ 	if(pfkey_msg->sadb_msg_version != PF_KEY_V2) {
+ 		KLIPS_PRINT(1 || debug_pfkey,
+@@ -1078,23 +1098,23 @@ pfkey_sendmsg(struct socket *sock, struc
+ 
+ DEBUG_NO_STATIC int
+ #ifdef NET_26
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
++# if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+ pfkey_recvmsg(struct socket *sock,
+-	      struct msghdr *msg,
+-	      size_t size,
+-	      int flags)
+-#else
+-pfkey_recvmsg(struct kiocb *kiocb
+-	      , struct socket *sock
+-	      , struct msghdr *msg
+-	      , size_t size
+-	      , int flags)
+-#endif
++              struct msghdr *msg,
++              size_t size,
++              int flags)
++# else
++pfkey_recvmsg(struct kiocb *kiocb,
++              struct socket *sock,
++              struct msghdr *msg,
++              size_t size,
++              int flags)
++# endif
+ #else
+-pfkey_recvmsg(struct socket *sock
+-	      , struct msghdr *msg
+-	      , int size, int flags
+-	      , struct scm_cookie *scm)
++pfkey_recvmsg(struct socket *sock,
++              struct msghdr *msg,
++              int size, int flags,
++              struct scm_cookie *scm)
+ #endif
+ {
+ 	struct sock *sk;
+@@ -1157,7 +1177,7 @@ pfkey_recvmsg(struct socket *sock
+ 		msg->msg_flags |= MSG_TRUNC;
+ 	}
+ 
+-	skb_copy_datagram_iovec(skb, 0, msg->msg_iov, size);
++	skb_copy_datagram_msg(skb, 0, msg, size);
+ #ifdef HAVE_KERNEL_TSTAMP
+ 	sk->sk_stamp = skb->tstamp;
+ #elif defined(HAVE_TSTAMP)
